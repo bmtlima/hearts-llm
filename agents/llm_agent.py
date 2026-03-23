@@ -32,7 +32,10 @@ MAX_RETRIES = 2
 CARD_PATTERN = re.compile(r"[2-9TJQKA][CDHS]")
 
 
-def build_turn_prompt(events, visible_state, legal_actions):
+SUIT_NAMES = {"C": "Clubs", "D": "Diamonds", "H": "Hearts", "S": "Spades"}
+
+
+def build_turn_prompt(events, visible_state, legal_actions, oracle_info=None):
     parts = []
 
     if events:
@@ -60,6 +63,35 @@ def build_turn_prompt(events, visible_state, legal_actions):
         parts.append("You are leading this trick.")
 
     parts.append(f"Legal plays: {', '.join(legal_actions)}")
+
+    if oracle_info:
+        parts.append("")
+        parts.append("Additional information:")
+        parts.append(f"- Hearts broken: {'Yes' if oracle_info['hearts_broken'] else 'No'}")
+        scores = oracle_info["scores"]
+        parts.append(
+            f"- Current scores: You: {scores.get(0, 0)}, "
+            f"Player 1: {scores.get(1, 0)}, "
+            f"Player 2: {scores.get(2, 0)}, "
+            f"Player 3: {scores.get(3, 0)}"
+        )
+        parts.append("- Cards still in play (not yet played, not in your hand):")
+        for s in "SHDC":
+            cards = oracle_info["remaining_by_suit"].get(s, [])
+            name = SUIT_NAMES[s]
+            if cards:
+                parts.append(f"    {name}: {', '.join(cards)}")
+            else:
+                parts.append(f"    {name}: (none remaining)")
+        parts.append(f"- Queen of spades: {oracle_info['queen_status']}")
+        voids = oracle_info.get("known_voids", {})
+        if voids:
+            void_parts = []
+            for pid in sorted(voids.keys()):
+                suits = ", ".join(SUIT_NAMES[s].lower() for s in sorted(voids[pid]))
+                void_parts.append(f"Player {pid} has shown no {suits}")
+            parts.append(f"- Known voids: {'; '.join(void_parts)}")
+
     parts.append("")
     parts.append("Your play:")
 
@@ -85,9 +117,14 @@ class LLMAgent(BaseAgent):
         events_since_last_turn: list[dict],
         visible_state: dict,
         legal_actions: list,
+        **kwargs,
     ) -> str:
-        prompt = build_turn_prompt(events_since_last_turn, visible_state, legal_actions)
+        oracle_info = kwargs.get("oracle_info")
+        prompt = build_turn_prompt(
+            events_since_last_turn, visible_state, legal_actions, oracle_info
+        )
         self.messages.append({"role": "user", "content": prompt})
+        self._last_prompt = prompt
 
         total_input_tokens = 0
         total_output_tokens = 0
@@ -162,6 +199,7 @@ class LLMAgent(BaseAgent):
                 "was_legal": was_legal,
                 "num_retries": num_retries,
                 "raw_response": raw_response,
+                "prompt": self._last_prompt,
                 "input_tokens": total_input_tokens,
                 "output_tokens": total_output_tokens,
                 "message_count": len(self.messages),
@@ -177,6 +215,7 @@ class LLMAgent(BaseAgent):
             "was_legal": False,
             "num_retries": num_retries,
             "raw_response": raw_response,
+            "prompt": self._last_prompt,
             "input_tokens": total_input_tokens,
             "output_tokens": total_output_tokens,
             "message_count": len(self.messages),

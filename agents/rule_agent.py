@@ -49,6 +49,7 @@ class RuleAgent(BaseAgent):
         events_since_last_turn: list[dict],
         visible_state: dict,
         legal_actions: list,
+        **kwargs,
     ) -> str:
         self._update_state(events_since_last_turn)
         hand = visible_state["your_hand"]

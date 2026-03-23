@@ -8,6 +8,7 @@ class BaseAgent(ABC):
         events_since_last_turn: list[dict],
         visible_state: dict,
         legal_actions: list,
+        **kwargs,
     ) -> str:
         pass
 

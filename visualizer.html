@@ -404,52 +404,9 @@ function escapeHTML(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-// Reconstruct the turn prompt exactly as the LLM sees it
-function buildTurnPrompt(turn, handData, trickIdx) {
-  const parts = [];
-
-  // Reconstruct events: previous trick result + cards played before LLM's turn
-  const prevTricks = handData.tricks;
-  const trickSoFar = turn.current_trick || [];
-
-  // Events since last turn: previous trick completion + cards in current trick before LLM
-  if (trickIdx > 0) {
-    const prev = prevTricks[trickIdx - 1];
-    if (prev) {
-      parts.push('Since your last turn:');
-      // Cards played by others after LLM's last play in previous trick
-      // + trick completion
-      const cardsStr = prev.cards.map(([p,c]) => `P${p}:${c}`).join(', ');
-      parts.push(`  Trick ${prev.trick_number} complete: ${cardsStr} → Player ${prev.winner} wins (${prev.points_in_trick} pts)`);
-      // Cards played in current trick before LLM
-      for (const [pid, card] of trickSoFar) {
-        parts.push(`  Player ${pid} played ${card}`);
-      }
-      parts.push('');
-    }
-  } else if (trickSoFar.length > 0) {
-    parts.push('Since your last turn:');
-    for (const [pid, card] of trickSoFar) {
-      parts.push(`  Player ${pid} played ${card}`);
-    }
-    parts.push('');
-  }
-
-  parts.push(`Trick ${turn.trick_number} of 13`);
-  parts.push(`Your hand: ${turn.hand.join(', ')}`);
-
-  if (trickSoFar.length > 0) {
-    const trickStr = trickSoFar.map(([p,c]) => `Player ${p}: ${c}`).join(', ');
-    parts.push(`Current trick: ${trickStr}`);
-  } else {
-    parts.push('You are leading this trick.');
-  }
-
-  parts.push(`Legal plays: ${turn.legal_actions.join(', ')}`);
-  parts.push('');
-  parts.push('Your play:');
-
-  return parts.join('\n');
+// Get the turn prompt — use the logged prompt if available, otherwise show a note
+function getTurnPrompt(turn) {
+  return turn.prompt || '(prompt not logged — re-run experiment to capture)';
 }
 
 // Build the full conversation up to this trick
@@ -459,7 +416,7 @@ function buildFullConversation(handData, upToTrickIdx) {
 
   for (let i = 0; i <= upToTrickIdx && i < handData.llm_turns.length; i++) {
     const turn = handData.llm_turns[i];
-    const prompt = buildTurnPrompt(turn, handData, i);
+    const prompt = getTurnPrompt(turn);
     html += `<div class="prompt-section"><span class="role-tag role-user">USER</span> <span style="color:var(--text-dim);font-size:10px">turn ${i+1}</span>\n${escapeHTML(prompt)}</div>`;
     html += `<div class="prompt-section"><span class="role-tag role-assistant">ASSISTANT</span>\n${escapeHTML(turn.raw_response || turn.card_played)}</div>`;
   }
@@ -657,7 +614,7 @@ function renderTrick() {
 
   // Turn prompt
   const turnPromptBox = document.getElementById('turnPromptBox');
-  const prompt = buildTurnPrompt(turn, hand, currentTrickIdx);
+  const prompt = getTurnPrompt(turn);
   turnPromptBox.innerHTML = `<span class="role-tag role-user">USER</span>\n${escapeHTML(prompt)}`;
 
   // Full conversation

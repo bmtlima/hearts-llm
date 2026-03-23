@@ -15,9 +15,9 @@ from games.hearts import HeartsGame
 from orchestrator import play_hand
 
 
-def run_experiment(num_hands, model, seed=42):
+def run_experiment(num_hands, model, seed=42, info_mode="raw"):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_path = f"logs/experiment_{timestamp}.jsonl"
+    log_path = f"logs/experiment_{info_mode}_{timestamp}.jsonl"
     os.makedirs("logs", exist_ok=True)
 
     api_key = os.environ["OPENROUTER_API_KEY"]
@@ -40,12 +40,13 @@ def run_experiment(num_hands, model, seed=42):
         for b in baselines.values():
             b.reset()
 
-        result = play_hand(game, agents, baselines)
+        result = play_hand(game, agents, baselines, info_mode=info_mode)
 
         hand_log = {
             "hand_number": hand_num,
             "seed": seed + hand_num,
             "model": model,
+            "info_mode": info_mode,
             "scores": result["scores"],
             "llm_score": result["scores"][0],
             "tricks": result["tricks"],
@@ -122,9 +123,15 @@ def main():
     parser.add_argument("--num-hands", type=int, default=10)
     parser.add_argument("--model", type=str, default="anthropic/claude-haiku-4.5")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--info-mode",
+        type=str,
+        choices=["raw", "oracle", "scratchpad"],
+        default="raw",
+    )
     args = parser.parse_args()
 
-    run_experiment(args.num_hands, args.model, args.seed)
+    run_experiment(args.num_hands, args.model, args.seed, args.info_mode)
 
 
 if __name__ == "__main__":
