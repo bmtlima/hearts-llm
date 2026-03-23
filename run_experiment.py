@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
 from dotenv import load_dotenv
@@ -15,7 +16,33 @@ from games.hearts import HeartsGame
 from orchestrator import play_hand
 
 
-def run_experiment(num_hands, model, seed=42, info_mode="raw"):
+def play_single_hand(hand_num, seed, model, api_key, info_mode):
+    """Play one hand. Fully self-contained — no shared state."""
+    game = HeartsGame(seed=seed + hand_num)
+
+    llm_agent = LLMAgent(model=model, api_key=api_key)
+    rule1, rule2, rule3 = RuleAgent(), RuleAgent(), RuleAgent()
+    agents = [llm_agent, rule1, rule2, rule3]
+
+    duck_baseline = DuckAgent()
+    rule_baseline = RuleAgent()
+    baselines = {"duck": duck_baseline, "rule": rule_baseline}
+
+    result = play_hand(game, agents, baselines, info_mode=info_mode)
+
+    return {
+        "hand_number": hand_num,
+        "seed": seed + hand_num,
+        "model": model,
+        "info_mode": info_mode,
+        "scores": result["scores"],
+        "llm_score": result["scores"][0],
+        "tricks": result["tricks"],
+        "llm_turns": result["llm_turns"],
+    }
+
+
+def run_experiment(num_hands, model, seed=42, info_mode="raw", workers=1):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_path = f"logs/experiment_{info_mode}_{timestamp}.jsonl"
     os.makedirs("logs", exist_ok=True)
@@ -24,44 +51,36 @@ def run_experiment(num_hands, model, seed=42, info_mode="raw"):
 
     all_results = []
 
-    for hand_num in range(num_hands):
-        game = HeartsGame(seed=seed + hand_num)
+    if workers <= 1:
+        for hand_num in range(num_hands):
+            hand_log = play_single_hand(hand_num, seed, model, api_key, info_mode)
+            all_results.append(hand_log)
+            s = hand_log["scores"]
+            print(
+                f"Hand {hand_num}: LLM={s[0]}  "
+                f"Bots={s[1]},{s[2]},{s[3]}"
+            )
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {
+                pool.submit(play_single_hand, h, seed, model, api_key, info_mode): h
+                for h in range(num_hands)
+            }
+            for future in as_completed(futures):
+                hand_log = future.result()
+                all_results.append(hand_log)
+                s = hand_log["scores"]
+                print(
+                    f"Hand {hand_log['hand_number']}: LLM={s[0]}  "
+                    f"Bots={s[1]},{s[2]},{s[3]}  "
+                    f"({len(all_results)}/{num_hands})"
+                )
 
-        llm_agent = LLMAgent(model=model, api_key=api_key)
-        rule1, rule2, rule3 = RuleAgent(), RuleAgent(), RuleAgent()
-        agents = [llm_agent, rule1, rule2, rule3]
-
-        duck_baseline = DuckAgent()
-        rule_baseline = RuleAgent()
-        baselines = {"duck": duck_baseline, "rule": rule_baseline}
-
-        for a in agents:
-            a.reset()
-        for b in baselines.values():
-            b.reset()
-
-        result = play_hand(game, agents, baselines, info_mode=info_mode)
-
-        hand_log = {
-            "hand_number": hand_num,
-            "seed": seed + hand_num,
-            "model": model,
-            "info_mode": info_mode,
-            "scores": result["scores"],
-            "llm_score": result["scores"][0],
-            "tricks": result["tricks"],
-            "llm_turns": result["llm_turns"],
-        }
-
-        with open(log_path, "a") as f:
+    # Sort by hand number and write JSONL
+    all_results.sort(key=lambda h: h["hand_number"])
+    with open(log_path, "w") as f:
+        for hand_log in all_results:
             f.write(json.dumps(hand_log) + "\n")
-
-        all_results.append(hand_log)
-
-        print(
-            f"Hand {hand_num}: LLM={result['scores'][0]}  "
-            f"Bots={result['scores'][1]},{result['scores'][2]},{result['scores'][3]}"
-        )
 
     print_summary(all_results)
     return all_results
@@ -129,9 +148,10 @@ def main():
         choices=["raw", "oracle", "scratchpad"],
         default="raw",
     )
+    parser.add_argument("--workers", type=int, default=1)
     args = parser.parse_args()
 
-    run_experiment(args.num_hands, args.model, args.seed, args.info_mode)
+    run_experiment(args.num_hands, args.model, args.seed, args.info_mode, args.workers)
 
 
 if __name__ == "__main__":
