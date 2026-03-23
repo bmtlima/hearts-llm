@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hearts LLM — Game Replay</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #232736;
+    --border: #2e3345;
+    --text: #e2e4ea;
+    --text-dim: #8b8fa3;
+    --accent: #6c8cff;
+    --accent-dim: #3d5199;
+    --green: #4ade80;
+    --red: #f87171;
+    --yellow: #fbbf24;
+    --heart: #ef4444;
+    --diamond: #3b82f6;
+    --club: #22c55e;
+    --spade: #a78bfa;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 24px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+  .topbar h1 { font-size: 14px; font-weight: 600; color: var(--accent); letter-spacing: 0.5px; }
+  .topbar .sep { color: var(--border); }
+
+  .file-label {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 12px; background: var(--accent-dim); color: var(--text);
+    border-radius: 6px; cursor: pointer; font-size: 12px; transition: background .15s;
+  }
+  .file-label:hover { background: var(--accent); }
+  .file-label input { display: none; }
+
+  .hand-nav { display: flex; align-items: center; gap: 8px; }
+  .hand-nav span { font-size: 12px; color: var(--text-dim); }
+
+  button {
+    background: var(--surface2); color: var(--text); border: 1px solid var(--border);
+    padding: 6px 14px; border-radius: 6px; cursor: pointer;
+    font-family: inherit; font-size: 12px; transition: all .15s;
+  }
+  button:hover { background: var(--accent-dim); border-color: var(--accent); }
+  button:disabled { opacity: 0.3; cursor: default; background: var(--surface2); border-color: var(--border); }
+
+  .main {
+    display: grid;
+    grid-template-columns: 1fr 380px;
+    gap: 0;
+    height: calc(100vh - 52px);
+  }
+
+  .table-area {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; padding: 32px; position: relative; overflow: hidden;
+  }
+
+  .trick-label { font-size: 13px; color: var(--text-dim); margin-bottom: 16px; }
+  .trick-label strong { color: var(--accent); }
+  .trick-label .lead-info { color: var(--yellow); margin-left: 8px; font-size: 11px; }
+
+  .card-table { position: relative; width: 400px; height: 320px; }
+
+  .player-slot {
+    position: absolute; display: flex; flex-direction: column;
+    align-items: center; gap: 8px;
+  }
+  .player-slot.top    { top: 0; left: 50%; transform: translateX(-50%); }
+  .player-slot.right  { top: 50%; right: 0; transform: translateY(-50%); }
+  .player-slot.bottom { bottom: 0; left: 50%; transform: translateX(-50%); }
+  .player-slot.left   { top: 50%; left: 0; transform: translateY(-50%); }
+
+  .player-label {
+    font-size: 11px; color: var(--text-dim); padding: 2px 8px;
+    background: var(--surface2); border-radius: 4px;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .player-label.is-llm { color: var(--accent); background: var(--accent-dim); }
+  .player-label .badge {
+    font-size: 9px; padding: 1px 4px; border-radius: 3px;
+    font-weight: 700; letter-spacing: 0.5px;
+  }
+  .player-label .lead-badge { background: var(--yellow); color: #000; }
+  .player-label .winner-badge { background: var(--green); color: #000; }
+
+  .played-card-wrap { position: relative; }
+
+  .played-card {
+    width: 64px; height: 90px; background: var(--surface);
+    border: 2px solid var(--border); border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px; font-weight: 700; transition: all .2s;
+  }
+  .played-card.empty { border-style: dashed; color: var(--border); font-size: 24px; }
+  .played-card.highlight { border-color: var(--accent); box-shadow: 0 0 16px rgba(108,140,255,0.25); }
+  .played-card.winner { border-color: var(--yellow); box-shadow: 0 0 16px rgba(251,191,36,0.3); }
+  .played-card.leader { border-color: var(--yellow); border-width: 2px; }
+
+  .play-order {
+    position: absolute; top: -8px; right: -8px;
+    width: 20px; height: 20px; border-radius: 50%;
+    background: var(--surface2); border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700; color: var(--text-dim);
+  }
+  .play-order.first { background: var(--yellow); color: #000; border-color: var(--yellow); }
+
+  .hand-section { margin-top: 32px; text-align: center; }
+  .hand-section .label {
+    font-size: 11px; color: var(--text-dim); margin-bottom: 10px;
+    text-transform: uppercase; letter-spacing: 1px;
+  }
+  .hand-cards { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
+  .hand-card {
+    width: 52px; height: 72px; background: var(--surface2);
+    border: 1.5px solid var(--border); border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px; font-weight: 600; transition: all .15s;
+  }
+  .hand-card.legal { border-color: var(--text-dim); }
+  .hand-card.played-this-turn {
+    border-color: var(--accent); background: var(--accent-dim);
+    transform: translateY(-6px); box-shadow: 0 4px 12px rgba(108,140,255,0.3);
+  }
+  .hand-card.not-legal { opacity: 0.35; }
+
+  .trick-nav { display: flex; align-items: center; gap: 8px; margin-top: 24px; }
+  .trick-dots { display: flex; gap: 4px; }
+  .trick-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--surface2); border: 1px solid var(--border);
+    cursor: pointer; transition: all .15s;
+  }
+  .trick-dot.active { background: var(--accent); border-color: var(--accent); }
+  .trick-dot.has-points { background: var(--red); border-color: var(--red); }
+  .trick-dot.has-points.active { background: var(--red); box-shadow: 0 0 8px rgba(248,113,113,0.5); }
+
+  .sidebar {
+    background: var(--surface); border-left: 1px solid var(--border);
+    overflow-y: auto; padding: 20px;
+    display: flex; flex-direction: column; gap: 16px;
+  }
+
+  .panel {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 14px;
+  }
+  .panel-title {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
+    color: var(--text-dim); margin-bottom: 10px;
+  }
+  .panel-title.clickable {
+    cursor: pointer; display: flex; align-items: center; justify-content: space-between;
+  }
+  .panel-title.clickable:hover { color: var(--text); }
+  .panel-title .toggle { font-size: 10px; transition: transform .15s; }
+  .panel-title .toggle.open { transform: rotate(90deg); }
+
+  .scores-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .score-item {
+    display: flex; justify-content: space-between;
+    padding: 6px 10px; background: var(--surface); border-radius: 4px; font-size: 12px;
+  }
+  .score-item .player-name { color: var(--text-dim); }
+  .score-item .score-val { font-weight: 700; }
+  .score-item.llm .player-name { color: var(--accent); }
+  .score-item.lowest .score-val { color: var(--green); }
+
+  .comparison-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px;
+  }
+  .comparison-row:last-child { border-bottom: none; }
+  .comparison-row .agent-name { color: var(--text-dim); font-size: 11px; }
+  .comparison-row .match { color: var(--green); }
+  .comparison-row .mismatch { color: var(--red); }
+
+  .events-log {
+    font-size: 11px; line-height: 1.6; color: var(--text-dim);
+    max-height: 160px; overflow-y: auto;
+  }
+  .events-log .event { padding: 2px 0; }
+  .events-log .card-ref { font-weight: 600; }
+
+  .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .meta-item { text-align: center; padding: 8px; background: var(--surface); border-radius: 4px; }
+  .meta-item .val { font-size: 18px; font-weight: 700; color: var(--accent); }
+  .meta-item .lbl { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+
+  .prompt-box {
+    font-size: 11px; line-height: 1.5; color: var(--text-dim);
+    white-space: pre-wrap; word-break: break-word;
+    max-height: 300px; overflow-y: auto;
+    background: var(--bg); padding: 10px; border-radius: 4px;
+    border: 1px solid var(--border);
+  }
+  .prompt-box .role-tag {
+    display: inline-block; padding: 1px 6px; border-radius: 3px;
+    font-size: 10px; font-weight: 700; margin-bottom: 4px;
+  }
+  .prompt-box .role-system { background: #4a3f6b; color: #c4b5fd; }
+  .prompt-box .role-user { background: #2d4a3f; color: #86efac; }
+  .prompt-box .role-assistant { background: #3d4a6b; color: #93c5fd; }
+  .prompt-section { margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+  .prompt-section:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+
+  .collapsible-content { overflow: hidden; transition: max-height .2s ease; }
+  .collapsible-content.collapsed { max-height: 0 !important; }
+
+  .empty-state {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; height: 100%; gap: 16px;
+    color: var(--text-dim); grid-column: 1 / -1;
+  }
+  .empty-state .icon { font-size: 48px; opacity: 0.3; }
+  .empty-state p { font-size: 13px; }
+
+  .suit-H, .suit-h { color: var(--heart); }
+  .suit-D, .suit-d { color: var(--diamond); }
+  .suit-C, .suit-c { color: var(--club); }
+  .suit-S, .suit-s { color: var(--spade); }
+
+  .kbd {
+    display: inline-block; padding: 1px 5px; background: var(--surface2);
+    border: 1px solid var(--border); border-radius: 3px;
+    font-size: 10px; color: var(--text-dim);
+  }
+
+  .tab-bar {
+    display: flex; gap: 0; margin-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .tab-btn {
+    padding: 6px 12px; font-size: 11px; font-family: inherit;
+    background: none; border: none; border-bottom: 2px solid transparent;
+    color: var(--text-dim); cursor: pointer; transition: all .15s;
+  }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>HEARTS LLM</h1>
+  <span class="sep">|</span>
+  <label class="file-label">
+    Load JSONL
+    <input type="file" id="fileInput" accept=".jsonl,.json">
+  </label>
+  <div class="hand-nav" id="handNav" style="display:none">
+    <span>Hand:</span>
+    <button id="prevHand" onclick="changeHand(-1)">&larr;</button>
+    <span id="handLabel">0/0</span>
+    <button id="nextHand" onclick="changeHand(1)">&rarr;</button>
+    <span class="sep">|</span>
+    <span id="modelLabel" style="font-size:11px; color:var(--text-dim)"></span>
+  </div>
+  <div style="margin-left:auto; font-size:10px; color:var(--text-dim)">
+    <span class="kbd">&larr;</span> <span class="kbd">&rarr;</span> tricks
+    &nbsp;
+    <span class="kbd">shift</span>+<span class="kbd">&larr;</span> <span class="kbd">&rarr;</span> hands
+  </div>
+</div>
+
+<div class="main" id="mainArea">
+  <div class="empty-state" id="emptyState">
+    <div class="icon">&#9829;</div>
+    <p>Load an experiment .jsonl file to begin</p>
+  </div>
+</div>
+
+<template id="gameTemplate">
+  <div class="table-area">
+    <div class="trick-label" id="trickLabel"></div>
+
+    <div class="card-table">
+      <div class="player-slot top" id="slot2">
+        <div class="player-label" id="label2">P2 (Rule)</div>
+        <div class="played-card-wrap"><div class="played-card empty" id="card2">?</div><div class="play-order" id="order2" style="display:none"></div></div>
+      </div>
+      <div class="player-slot left" id="slot1">
+        <div class="player-label" id="label1">P1 (Rule)</div>
+        <div class="played-card-wrap"><div class="played-card empty" id="card1">?</div><div class="play-order" id="order1" style="display:none"></div></div>
+      </div>
+      <div class="player-slot right" id="slot3">
+        <div class="player-label" id="label3">P3 (Rule)</div>
+        <div class="played-card-wrap"><div class="played-card empty" id="card3">?</div><div class="play-order" id="order3" style="display:none"></div></div>
+      </div>
+      <div class="player-slot bottom" id="slot0">
+        <div class="player-label is-llm" id="label0">P0 (LLM)</div>
+        <div class="played-card-wrap"><div class="played-card empty" id="card0">?</div><div class="play-order" id="order0" style="display:none"></div></div>
+      </div>
+    </div>
+
+    <div class="hand-section">
+      <div class="label">LLM Hand</div>
+      <div class="hand-cards" id="handCards"></div>
+    </div>
+
+    <div class="trick-nav">
+      <button id="prevTrick" onclick="changeTrick(-1)">&larr; Prev</button>
+      <div class="trick-dots" id="trickDots"></div>
+      <button id="nextTrick" onclick="changeTrick(1)">Next &rarr;</button>
+    </div>
+  </div>
+
+  <div class="sidebar">
+    <div class="panel">
+      <div class="panel-title">Final Scores</div>
+      <div class="scores-grid" id="scoresGrid"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">This Turn — Comparison</div>
+      <div id="comparisonPanel"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">LLM Stats</div>
+      <div class="meta-grid" id="metaGrid"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Events Visible to LLM</div>
+      <div class="events-log" id="eventsLog"></div>
+    </div>
+
+    <div class="panel">
+      <div class="tab-bar">
+        <button class="tab-btn active" onclick="switchTab(this, 'turnPrompt')">Turn Prompt</button>
+        <button class="tab-btn" onclick="switchTab(this, 'systemPrompt')">System Prompt</button>
+        <button class="tab-btn" onclick="switchTab(this, 'fullConvo')">Full Conversation</button>
+      </div>
+      <div class="tab-content active" id="turnPrompt">
+        <div class="prompt-box" id="turnPromptBox"></div>
+      </div>
+      <div class="tab-content" id="systemPrompt">
+        <div class="prompt-box" id="systemPromptBox"></div>
+      </div>
+      <div class="tab-content" id="fullConvo">
+        <div class="prompt-box" id="fullConvoBox" style="max-height:400px"></div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+const SUIT_SYMBOLS = { C: '♣', D: '♦', H: '♥', S: '♠' };
+
+const SYSTEM_PROMPT = `You are playing the card game Hearts as Player 0, against 3 other players.
+
+Rules:
+- 4 players, 13 tricks per hand. Standard 52-card deck.
+- You must follow the suit that was led if you have cards in that suit.
+- Hearts cannot be led until a heart has been discarded on a previous trick ("hearts broken").
+- First trick: the player with the 2 of clubs leads it. No hearts or Queen of Spades may be played on the first trick (unless you have no other option).
+- Scoring: each heart = 1 point, Queen of Spades (QS) = 13 points. Lowest score wins.
+- If one player takes all 26 points, they score 0 and everyone else scores 26 ("shooting the moon").
+
+Cards are written as rank + suit. Ranks: 2,3,4,5,6,7,8,9,T,J,Q,K,A. Suits: C,D,H,S.
+Examples: "2C" = 2 of clubs, "TH" = 10 of hearts, "QS" = queen of spades.
+
+Each turn I will tell you:
+- What happened since your last turn (cards played, tricks won)
+- Your current hand
+- The current trick so far (if any cards have been played)
+- Your legal plays
+
+Respond with ONLY the card you want to play. Just the card code, nothing else. Example: "QS"`;
+
+let allHands = [];
+let currentHandIdx = 0;
+let currentTrickIdx = 0;
+
+function cardHTML(card) {
+  if (!card) return '?';
+  return `<span class="suit-${card[1]}">${card[0]}${SUIT_SYMBOLS[card[1]]}</span>`;
+}
+
+function escapeHTML(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// Reconstruct the turn prompt exactly as the LLM sees it
+function buildTurnPrompt(turn, handData, trickIdx) {
+  const parts = [];
+
+  // Reconstruct events: previous trick result + cards played before LLM's turn
+  const prevTricks = handData.tricks;
+  const trickSoFar = turn.current_trick || [];
+
+  // Events since last turn: previous trick completion + cards in current trick before LLM
+  if (trickIdx > 0) {
+    const prev = prevTricks[trickIdx - 1];
+    if (prev) {
+      parts.push('Since your last turn:');
+      // Cards played by others after LLM's last play in previous trick
+      // + trick completion
+      const cardsStr = prev.cards.map(([p,c]) => `P${p}:${c}`).join(', ');
+      parts.push(`  Trick ${prev.trick_number} complete: ${cardsStr} → Player ${prev.winner} wins (${prev.points_in_trick} pts)`);
+      // Cards played in current trick before LLM
+      for (const [pid, card] of trickSoFar) {
+        parts.push(`  Player ${pid} played ${card}`);
+      }
+      parts.push('');
+    }
+  } else if (trickSoFar.length > 0) {
+    parts.push('Since your last turn:');
+    for (const [pid, card] of trickSoFar) {
+      parts.push(`  Player ${pid} played ${card}`);
+    }
+    parts.push('');
+  }
+
+  parts.push(`Trick ${turn.trick_number} of 13`);
+  parts.push(`Your hand: ${turn.hand.join(', ')}`);
+
+  if (trickSoFar.length > 0) {
+    const trickStr = trickSoFar.map(([p,c]) => `Player ${p}: ${c}`).join(', ');
+    parts.push(`Current trick: ${trickStr}`);
+  } else {
+    parts.push('You are leading this trick.');
+  }
+
+  parts.push(`Legal plays: ${turn.legal_actions.join(', ')}`);
+  parts.push('');
+  parts.push('Your play:');
+
+  return parts.join('\n');
+}
+
+// Build the full conversation up to this trick
+function buildFullConversation(handData, upToTrickIdx) {
+  let html = '';
+  html += `<div class="prompt-section"><span class="role-tag role-system">SYSTEM</span>\n${escapeHTML(SYSTEM_PROMPT)}</div>`;
+
+  for (let i = 0; i <= upToTrickIdx && i < handData.llm_turns.length; i++) {
+    const turn = handData.llm_turns[i];
+    const prompt = buildTurnPrompt(turn, handData, i);
+    html += `<div class="prompt-section"><span class="role-tag role-user">USER</span> <span style="color:var(--text-dim);font-size:10px">turn ${i+1}</span>\n${escapeHTML(prompt)}</div>`;
+    html += `<div class="prompt-section"><span class="role-tag role-assistant">ASSISTANT</span>\n${escapeHTML(turn.raw_response || turn.card_played)}</div>`;
+  }
+
+  return html;
+}
+
+function switchTab(btn, tabId) {
+  btn.closest('.panel').querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  btn.closest('.panel').querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.getElementById(tabId).classList.add('active');
+}
+
+document.getElementById('fileInput').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    const lines = ev.target.result.trim().split('\n');
+    allHands = lines.map(l => JSON.parse(l));
+    currentHandIdx = 0;
+    currentTrickIdx = 0;
+    initUI();
+    renderHand();
+  };
+  reader.readAsText(file);
+});
+
+function initUI() {
+  const main = document.getElementById('mainArea');
+  const empty = document.getElementById('emptyState');
+  if (empty) empty.remove();
+  main.innerHTML = '';
+  const tpl = document.getElementById('gameTemplate');
+  main.appendChild(tpl.content.cloneNode(true));
+  document.getElementById('handNav').style.display = 'flex';
+}
+
+function renderHand() {
+  const hand = allHands[currentHandIdx];
+  if (!hand) return;
+
+  document.getElementById('handLabel').textContent = `${currentHandIdx + 1} / ${allHands.length}`;
+  document.getElementById('prevHand').disabled = currentHandIdx === 0;
+  document.getElementById('nextHand').disabled = currentHandIdx === allHands.length - 1;
+  document.getElementById('modelLabel').textContent = hand.model || '';
+
+  // Scores
+  const scoresGrid = document.getElementById('scoresGrid');
+  const scores = hand.scores;
+  const scoreEntries = [0,1,2,3].map(i => ({ player: i, score: scores[i] ?? scores[String(i)] ?? 0 }));
+  const minScore = Math.min(...scoreEntries.map(e => e.score));
+  scoresGrid.innerHTML = scoreEntries.map(e => {
+    const cls = ['score-item'];
+    if (e.player === 0) cls.push('llm');
+    if (e.score === minScore) cls.push('lowest');
+    const label = e.player === 0 ? 'P0 (LLM)' : `P${e.player} (Rule)`;
+    return `<div class="${cls.join(' ')}"><span class="player-name">${label}</span><span class="score-val">${e.score}</span></div>`;
+  }).join('');
+
+  // System prompt (static)
+  document.getElementById('systemPromptBox').textContent = SYSTEM_PROMPT;
+
+  // Trick dots
+  const dotsContainer = document.getElementById('trickDots');
+  dotsContainer.innerHTML = '';
+  for (let i = 0; i < hand.llm_turns.length; i++) {
+    const dot = document.createElement('div');
+    dot.className = 'trick-dot';
+    if (i === currentTrickIdx) dot.classList.add('active');
+    const trick = hand.tricks[i];
+    if (trick && trick.points_in_trick > 0) dot.classList.add('has-points');
+    dot.onclick = () => { currentTrickIdx = i; renderTrick(); };
+    dotsContainer.appendChild(dot);
+  }
+
+  renderTrick();
+}
+
+function renderTrick() {
+  const hand = allHands[currentHandIdx];
+  const turn = hand.llm_turns[currentTrickIdx];
+  const trick = hand.tricks[currentTrickIdx];
+
+  document.querySelectorAll('.trick-dot').forEach((d, i) => {
+    d.classList.toggle('active', i === currentTrickIdx);
+  });
+
+  // Determine leader from trick data
+  const trickCards = trick ? trick.cards : [];
+  const leader = trickCards.length > 0 ? trickCards[0][0] : -1;
+  const winner = trick ? trick.winner : -1;
+
+  // Build play order map: player -> 1-based position
+  const playOrder = {};
+  trickCards.forEach(([pid], idx) => { playOrder[pid] = idx + 1; });
+
+  // Trick label with leader info
+  const trickLabel = document.getElementById('trickLabel');
+  let leaderText = '';
+  if (leader >= 0) {
+    leaderText = leader === 0
+      ? `<span class="lead-info">You lead</span>`
+      : `<span class="lead-info">P${leader} leads</span>`;
+  }
+  trickLabel.innerHTML = `Trick <strong>${turn.trick_number}</strong> of 13${leaderText}`;
+
+  document.getElementById('prevTrick').disabled = currentTrickIdx === 0;
+  document.getElementById('nextTrick').disabled = currentTrickIdx === hand.llm_turns.length - 1;
+
+  // Cards on table with play order
+  for (let p = 0; p < 4; p++) {
+    const cardEl = document.getElementById(`card${p}`);
+    const orderEl = document.getElementById(`order${p}`);
+    const labelEl = document.getElementById(`label${p}`);
+    const entry = trickCards.find(([pid]) => pid === p);
+
+    // Reset label
+    const baseName = p === 0 ? 'P0 (LLM)' : `P${p} (Rule)`;
+    let badges = '';
+    if (p === leader) badges += '<span class="badge lead-badge">LEAD</span>';
+    if (p === winner) badges += '<span class="badge winner-badge">WIN</span>';
+    labelEl.innerHTML = baseName + ' ' + badges;
+    labelEl.className = 'player-label' + (p === 0 ? ' is-llm' : '');
+
+    if (entry) {
+      const [, card] = entry;
+      cardEl.innerHTML = cardHTML(card);
+      cardEl.className = 'played-card';
+      if (p === 0) cardEl.classList.add('highlight');
+      if (p === winner) cardEl.classList.add('winner');
+      if (p === leader) cardEl.classList.add('leader');
+
+      orderEl.textContent = playOrder[p];
+      orderEl.className = 'play-order' + (playOrder[p] === 1 ? ' first' : '');
+      orderEl.style.display = '';
+    } else {
+      cardEl.innerHTML = '?';
+      cardEl.className = 'played-card empty';
+      orderEl.style.display = 'none';
+    }
+  }
+
+  // LLM hand
+  const handCards = document.getElementById('handCards');
+  const legalSet = new Set(turn.legal_actions);
+  const playedCard = turn.card_played;
+  handCards.innerHTML = turn.hand.map(c => {
+    const cls = ['hand-card'];
+    if (c === playedCard) cls.push('played-this-turn');
+    else if (legalSet.has(c)) cls.push('legal');
+    else cls.push('not-legal');
+    return `<div class="${cls.join(' ')}">${cardHTML(c)}</div>`;
+  }).join('');
+
+  // Comparison
+  const compPanel = document.getElementById('comparisonPanel');
+  const baselines = turn.baseline_choices || {};
+  let compHTML = `<div class="comparison-row"><span class="agent-name">LLM played</span><span style="font-weight:700">${cardHTML(playedCard)}</span></div>`;
+  for (const [name, card] of Object.entries(baselines)) {
+    const match = card === playedCard;
+    compHTML += `<div class="comparison-row"><span class="agent-name">${name} would play</span><span class="${match ? 'match' : 'mismatch'}">${cardHTML(card)} ${match ? '✓' : '✗'}</span></div>`;
+  }
+  compPanel.innerHTML = compHTML;
+
+  // Meta stats
+  const metaGrid = document.getElementById('metaGrid');
+  metaGrid.innerHTML = `
+    <div class="meta-item"><div class="val">${turn.input_tokens || 0}</div><div class="lbl">input tokens</div></div>
+    <div class="meta-item"><div class="val">${turn.message_count || 0}</div><div class="lbl">messages</div></div>
+    <div class="meta-item"><div class="val">${turn.num_retries || 0}</div><div class="lbl">retries</div></div>
+    <div class="meta-item"><div class="val">${(turn.elapsed_seconds || 0).toFixed(1)}s</div><div class="lbl">latency</div></div>
+  `;
+
+  // Events log — what the LLM actually sees this turn
+  const eventsLog = document.getElementById('eventsLog');
+  const trickSoFar = turn.current_trick || [];
+  let evHTML = '';
+  if (currentTrickIdx > 0) {
+    const prevTrick = hand.tricks[currentTrickIdx - 1];
+    if (prevTrick) {
+      const cs = prevTrick.cards.map(([p,c]) => `P${p}:${cardHTML(c)}`).join(', ');
+      evHTML += `<div class="event" style="color:var(--yellow)">Trick ${prevTrick.trick_number} complete: ${cs} → P${prevTrick.winner} wins (${prevTrick.points_in_trick} pts)</div>`;
+    }
+  }
+  if (trickSoFar.length === 0) {
+    evHTML += '<div class="event" style="color:var(--accent)">You are leading this trick.</div>';
+  } else {
+    for (const [pid, card] of trickSoFar) {
+      evHTML += `<div class="event">Player ${pid} played <span class="card-ref">${cardHTML(card)}</span></div>`;
+    }
+  }
+  eventsLog.innerHTML = evHTML;
+
+  // Turn prompt
+  const turnPromptBox = document.getElementById('turnPromptBox');
+  const prompt = buildTurnPrompt(turn, hand, currentTrickIdx);
+  turnPromptBox.innerHTML = `<span class="role-tag role-user">USER</span>\n${escapeHTML(prompt)}`;
+
+  // Full conversation
+  const fullConvoBox = document.getElementById('fullConvoBox');
+  fullConvoBox.innerHTML = buildFullConversation(hand, currentTrickIdx);
+  // Scroll to bottom
+  fullConvoBox.scrollTop = fullConvoBox.scrollHeight;
+}
+
+function changeHand(delta) {
+  const newIdx = currentHandIdx + delta;
+  if (newIdx < 0 || newIdx >= allHands.length) return;
+  currentHandIdx = newIdx;
+  currentTrickIdx = 0;
+  initUI();
+  renderHand();
+}
+
+function changeTrick(delta) {
+  const hand = allHands[currentHandIdx];
+  if (!hand) return;
+  const newIdx = currentTrickIdx + delta;
+  if (newIdx < 0 || newIdx >= hand.llm_turns.length) return;
+  currentTrickIdx = newIdx;
+  renderTrick();
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.shiftKey) {
+    if (e.key === 'ArrowLeft') { e.preventDefault(); changeHand(-1); }
+    if (e.key === 'ArrowRight') { e.preventDefault(); changeHand(1); }
+  } else {
+    if (e.key === 'ArrowLeft') { e.preventDefault(); changeTrick(-1); }
+    if (e.key === 'ArrowRight') { e.preventDefault(); changeTrick(1); }
+  }
+});
+</script>
+
+</body>
+</html>
