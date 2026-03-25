@@ -30,6 +30,7 @@ Respond with ONLY the card you want to play. Just the card code, nothing else. E
 
 MAX_RETRIES = 2
 CARD_PATTERN = re.compile(r"[2-9TJQKA][CDHS]")
+ORACLE_BLOCK = re.compile(r"\nAdditional information:\n.*?(?=\nYour play:)", re.DOTALL)
 
 
 SUIT_NAMES = {"C": "Clubs", "D": "Diamonds", "H": "Hearts", "S": "Spades"}
@@ -99,11 +100,12 @@ def build_turn_prompt(events, visible_state, legal_actions, oracle_info=None):
 
 
 class LLMAgent(BaseAgent):
-    def __init__(self, model: str = "anthropic/claude-haiku-4.5", api_key: str | None = None):
+    def __init__(self, model: str = "deepseek/deepseek-v3.2", api_key: str | None = None):
         self.model = model
         self.client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=api_key,
+            timeout=60.0,
         )
         self.messages: list[dict] = []
         self.last_turn_metadata: dict = {}
@@ -125,27 +127,51 @@ class LLMAgent(BaseAgent):
         )
         self.messages.append({"role": "user", "content": prompt})
         self._last_prompt = prompt
+        self._last_api_messages = None  # set after cleaning
 
         total_input_tokens = 0
         total_output_tokens = 0
+        total_reasoning_tokens = 0
         num_retries = 0
         was_legal = True
         raw_response = ""
+        reasoning_content = ""
 
         start_time = time.time()
 
         for attempt in range(1 + MAX_RETRIES):
-            api_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + self.messages
+            # Strip oracle info from old turns — only the latest message keeps it
+            cleaned = []
+            for msg in self.messages[:-1]:
+                if msg["role"] == "user" and "\nAdditional information:\n" in msg["content"]:
+                    cleaned.append({**msg, "content": ORACLE_BLOCK.sub("", msg["content"])})
+                else:
+                    cleaned.append(msg)
+            cleaned.append(self.messages[-1])
+            api_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + cleaned
+            if attempt == 0:
+                self._last_api_messages = api_messages
             response = self.client.chat.completions.create(
                 model=self.model,
                 max_tokens=10,
                 temperature=0,
                 messages=api_messages,
+                extra_body={"reasoning": {"enabled": True, "max_tokens": 2000}},
             )
 
-            raw_text = response.choices[0].message.content
+            raw_text = response.choices[0].message.content or ""
             total_input_tokens += response.usage.prompt_tokens
             total_output_tokens += response.usage.completion_tokens
+            # Reasoning tokens from completion_tokens_details
+            ctd = response.usage.completion_tokens_details
+            if ctd and ctd.reasoning_tokens:
+                total_reasoning_tokens += ctd.reasoning_tokens
+
+            # Reasoning content from model_extra
+            msg = response.choices[0].message
+            r_content = (msg.model_extra or {}).get("reasoning")
+            if attempt == 0 and r_content:
+                reasoning_content = r_content
 
             if attempt == 0:
                 raw_response = raw_text
@@ -199,9 +225,12 @@ class LLMAgent(BaseAgent):
                 "was_legal": was_legal,
                 "num_retries": num_retries,
                 "raw_response": raw_response,
+                "reasoning_content": reasoning_content,
                 "prompt": self._last_prompt,
+                "api_messages": self._last_api_messages,
                 "input_tokens": total_input_tokens,
                 "output_tokens": total_output_tokens,
+                "reasoning_tokens": total_reasoning_tokens,
                 "message_count": len(self.messages),
                 "elapsed_seconds": round(elapsed, 3),
             }

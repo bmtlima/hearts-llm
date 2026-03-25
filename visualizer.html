@@ -273,7 +273,8 @@
   <div class="hand-nav" id="handNav" style="display:none">
     <span>Hand:</span>
     <button id="prevHand" onclick="changeHand(-1)">&larr;</button>
-    <span id="handLabel">0/0</span>
+    <input id="handInput" type="number" min="0" style="width:50px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-family:inherit;font-size:12px;text-align:center;" onchange="goToHand(this.value)" onkeydown="if(event.key==='Enter'){goToHand(this.value);this.blur()}">
+    <span id="handTotal" style="font-size:12px;color:var(--text-dim)">/ 0</span>
     <button id="nextHand" onclick="changeHand(1)">&rarr;</button>
     <span class="sep">|</span>
     <span id="modelLabel" style="font-size:11px; color:var(--text-dim)"></span>
@@ -336,6 +337,11 @@
     <div class="panel">
       <div class="panel-title">This Turn — Comparison</div>
       <div id="comparisonPanel"></div>
+    </div>
+
+    <div class="panel" id="reasoningPanel" style="display:none">
+      <div class="panel-title">Reasoning</div>
+      <div class="prompt-box" id="reasoningBox" style="max-height:250px;font-size:11px;color:var(--yellow);"></div>
     </div>
 
     <div class="panel">
@@ -409,18 +415,31 @@ function getTurnPrompt(turn) {
   return turn.prompt || '(prompt not logged — re-run experiment to capture)';
 }
 
-// Build the full conversation up to this trick
+// Build the full conversation — use api_messages from the current turn if available
+// (this shows exactly what the LLM received, with oracle stripped from old turns)
 function buildFullConversation(handData, upToTrickIdx) {
-  let html = '';
-  html += `<div class="prompt-section"><span class="role-tag role-system">SYSTEM</span>\n${escapeHTML(SYSTEM_PROMPT)}</div>`;
+  const turn = handData.llm_turns[upToTrickIdx];
 
-  for (let i = 0; i <= upToTrickIdx && i < handData.llm_turns.length; i++) {
-    const turn = handData.llm_turns[i];
-    const prompt = getTurnPrompt(turn);
-    html += `<div class="prompt-section"><span class="role-tag role-user">USER</span> <span style="color:var(--text-dim);font-size:10px">turn ${i+1}</span>\n${escapeHTML(prompt)}</div>`;
-    html += `<div class="prompt-section"><span class="role-tag role-assistant">ASSISTANT</span>\n${escapeHTML(turn.raw_response || turn.card_played)}</div>`;
+  // If we have api_messages logged, use them directly — this is the ground truth
+  if (turn.api_messages) {
+    let html = '';
+    for (const msg of turn.api_messages) {
+      const role = msg.role.toUpperCase();
+      const cls = `role-${msg.role}`;
+      html += `<div class="prompt-section"><span class="role-tag ${cls}">${role}</span>\n${escapeHTML(msg.content)}</div>`;
+    }
+    return html;
   }
 
+  // Fallback: reconstruct from per-turn prompts
+  let html = '';
+  html += `<div class="prompt-section"><span class="role-tag role-system">SYSTEM</span>\n${escapeHTML(SYSTEM_PROMPT)}</div>`;
+  for (let i = 0; i <= upToTrickIdx && i < handData.llm_turns.length; i++) {
+    const t = handData.llm_turns[i];
+    const prompt = getTurnPrompt(t);
+    html += `<div class="prompt-section"><span class="role-tag role-user">USER</span> <span style="color:var(--text-dim);font-size:10px">turn ${i+1}</span>\n${escapeHTML(prompt)}</div>`;
+    html += `<div class="prompt-section"><span class="role-tag role-assistant">ASSISTANT</span>\n${escapeHTML(t.raw_response || t.card_played)}</div>`;
+  }
   return html;
 }
 
@@ -460,7 +479,8 @@ function renderHand() {
   const hand = allHands[currentHandIdx];
   if (!hand) return;
 
-  document.getElementById('handLabel').textContent = `${currentHandIdx + 1} / ${allHands.length}`;
+  document.getElementById('handInput').value = currentHandIdx;
+  document.getElementById('handTotal').textContent = `/ ${allHands.length - 1}`;
   document.getElementById('prevHand').disabled = currentHandIdx === 0;
   document.getElementById('nextHand').disabled = currentHandIdx === allHands.length - 1;
   document.getElementById('modelLabel').textContent = hand.model || '';
@@ -583,13 +603,25 @@ function renderTrick() {
   }
   compPanel.innerHTML = compHTML;
 
+  // Reasoning panel
+  const reasoningPanel = document.getElementById('reasoningPanel');
+  const reasoningBox = document.getElementById('reasoningBox');
+  if (turn.reasoning_content) {
+    reasoningPanel.style.display = '';
+    reasoningBox.textContent = turn.reasoning_content;
+  } else {
+    reasoningPanel.style.display = 'none';
+  }
+
   // Meta stats
   const metaGrid = document.getElementById('metaGrid');
+  const reasoningTok = turn.reasoning_tokens || 0;
   metaGrid.innerHTML = `
     <div class="meta-item"><div class="val">${turn.input_tokens || 0}</div><div class="lbl">input tokens</div></div>
     <div class="meta-item"><div class="val">${turn.message_count || 0}</div><div class="lbl">messages</div></div>
     <div class="meta-item"><div class="val">${turn.num_retries || 0}</div><div class="lbl">retries</div></div>
     <div class="meta-item"><div class="val">${(turn.elapsed_seconds || 0).toFixed(1)}s</div><div class="lbl">latency</div></div>
+    ${reasoningTok ? `<div class="meta-item" style="grid-column:1/-1"><div class="val">${reasoningTok}</div><div class="lbl">reasoning tokens</div></div>` : ''}
   `;
 
   // Events log — what the LLM actually sees this turn
@@ -624,13 +656,20 @@ function renderTrick() {
   fullConvoBox.scrollTop = fullConvoBox.scrollHeight;
 }
 
-function changeHand(delta) {
-  const newIdx = currentHandIdx + delta;
-  if (newIdx < 0 || newIdx >= allHands.length) return;
-  currentHandIdx = newIdx;
+function goToHand(val) {
+  const idx = parseInt(val, 10);
+  if (isNaN(idx) || idx < 0 || idx >= allHands.length) {
+    document.getElementById('handInput').value = currentHandIdx;
+    return;
+  }
+  currentHandIdx = idx;
   currentTrickIdx = 0;
   initUI();
   renderHand();
+}
+
+function changeHand(delta) {
+  goToHand(currentHandIdx + delta);
 }
 
 function changeTrick(delta) {

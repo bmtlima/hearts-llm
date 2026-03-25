@@ -83,6 +83,14 @@ def run_experiment(num_hands, model, seed=42, info_mode="raw", workers=1):
             f.write(json.dumps(hand_log) + "\n")
 
     print_summary(all_results)
+
+    # Write human-readable summary to more_logs/
+    from summarize_log import summarize
+    os.makedirs("more_logs", exist_ok=True)
+    model_short = model.split("/")[-1]
+    summary_path = f"more_logs/{model_short}_{info_mode}_{timestamp}.md"
+    summarize(log_path, summary_path)
+
     return all_results
 
 
@@ -140,7 +148,7 @@ def print_summary(results):
 def main():
     parser = argparse.ArgumentParser(description="Hearts context-rot experiment")
     parser.add_argument("--num-hands", type=int, default=10)
-    parser.add_argument("--model", type=str, default="anthropic/claude-haiku-4.5")
+    parser.add_argument("--model", type=str, default="deepseek/deepseek-v3.2")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
         "--info-mode",

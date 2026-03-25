@@ -16,3 +16,5 @@ logs/
 .claude/staged-files.json
 .claude/session-pids.json
 .claude/hooks/log-attribution.sh
+
+more_logs/
