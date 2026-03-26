@@ -16,11 +16,11 @@ from games.hearts import HeartsGame
 from orchestrator import play_hand
 
 
-def play_single_hand(hand_num, seed, model, api_key, info_mode):
+def play_single_hand(hand_num, seed, model, api_key, info_mode, shoot_the_moon=False):
     """Play one hand. Fully self-contained — no shared state."""
-    game = HeartsGame(seed=seed + hand_num)
+    game = HeartsGame(seed=seed + hand_num, shoot_the_moon=shoot_the_moon)
 
-    llm_agent = LLMAgent(model=model, api_key=api_key)
+    llm_agent = LLMAgent(model=model, api_key=api_key, shoot_the_moon=shoot_the_moon)
     rule1, rule2, rule3 = RuleAgent(), RuleAgent(), RuleAgent()
     agents = [llm_agent, rule1, rule2, rule3]
 
@@ -42,7 +42,7 @@ def play_single_hand(hand_num, seed, model, api_key, info_mode):
     }
 
 
-def run_experiment(num_hands, model, seed=42, info_mode="raw", workers=1):
+def run_experiment(num_hands, model, seed=42, info_mode="raw", workers=1, shoot_the_moon=False):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_path = f"logs/experiment_{info_mode}_{timestamp}.jsonl"
     os.makedirs("logs", exist_ok=True)
@@ -53,7 +53,7 @@ def run_experiment(num_hands, model, seed=42, info_mode="raw", workers=1):
 
     if workers <= 1:
         for hand_num in range(num_hands):
-            hand_log = play_single_hand(hand_num, seed, model, api_key, info_mode)
+            hand_log = play_single_hand(hand_num, seed, model, api_key, info_mode, shoot_the_moon)
             all_results.append(hand_log)
             s = hand_log["scores"]
             print(
@@ -63,7 +63,7 @@ def run_experiment(num_hands, model, seed=42, info_mode="raw", workers=1):
     else:
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = {
-                pool.submit(play_single_hand, h, seed, model, api_key, info_mode): h
+                pool.submit(play_single_hand, h, seed, model, api_key, info_mode, shoot_the_moon): h
                 for h in range(num_hands)
             }
             for future in as_completed(futures):
@@ -157,9 +157,11 @@ def main():
         default="raw",
     )
     parser.add_argument("--workers", type=int, default=1)
+    parser.add_argument("--shoot-the-moon", action="store_true", default=False,
+                        help="Enable shoot-the-moon scoring (disabled by default)")
     args = parser.parse_args()
 
-    run_experiment(args.num_hands, args.model, args.seed, args.info_mode, args.workers)
+    run_experiment(args.num_hands, args.model, args.seed, args.info_mode, args.workers, args.shoot_the_moon)
 
 
 if __name__ == "__main__":

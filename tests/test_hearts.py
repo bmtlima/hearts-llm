@@ -34,14 +34,14 @@ def play_full_hand(game, agents):
     return game.get_scores(), tricks, all_events
 
 
-def test_scores_sum_to_26_or_78():
-    """Run 1000 hands with 4 RandomAgents; scores must sum to 26 or 78."""
+def test_scores_sum_to_26():
+    """Run 1000 hands with 4 RandomAgents; scores must always sum to 26."""
     agents = [RandomAgent() for _ in range(4)]
     for seed in range(1000):
         game = HeartsGame(seed=seed)
         scores, _, _ = play_full_hand(game, agents)
         total = sum(scores.values())
-        assert total in (26, 78), f"Seed {seed}: scores {scores} sum to {total}"
+        assert total == 26, f"Seed {seed}: scores {scores} sum to {total}"
 
 
 def test_first_trick_starts_with_2c():
@@ -178,8 +178,8 @@ def test_first_trick_only_penalty_cards():
 
 
 def test_shoot_the_moon():
-    """When one player takes all 26 points, they get 0 and others get 26."""
-    game = HeartsGame(seed=0)
+    """When shoot_the_moon=True and one player takes all 26 points, they get 0 and others get 26."""
+    game = HeartsGame(seed=0, shoot_the_moon=True)
     game.deal()
 
     # Rig a deal where player 0 can take every trick
@@ -189,13 +189,10 @@ def test_shoot_the_moon():
         2: ["7C", "8C", "9C", "TC", "JC", "7D", "8D", "9D", "TD", "JD", "4H", "5H", "3S"],
         3: ["7S", "8S", "9S", "TS", "JS", "7H", "8H", "9H", "TH", "6H", "6S", "4S", "5S"],
     }
-    # Player 1 has 2C, so they lead
     game._current_player = 1
     game.trick_number = 1
     game.hearts_broken = False
 
-    # Play all 13 tricks — player 0 should win every trick with highest cards
-    # We'll use agents that always play highest legal card for P0 and lowest for others
     class HighAgent:
         def choose_action(self, events, visible, legal):
             return max(legal, key=lambda c: rank_value(c))
@@ -218,11 +215,51 @@ def test_shoot_the_moon():
                 pending[i].extend(events)
 
     scores = game.get_scores()
-    # Player 0 should have shot the moon
     assert scores[0] == 0, f"Shooter got {scores[0]}"
     for p in [1, 2, 3]:
         assert scores[p] == 26, f"Player {p} got {scores[p]}"
     assert sum(scores.values()) == 78
+
+
+def test_no_shoot_the_moon_by_default():
+    """When shoot_the_moon=False (default), taking all 26 points stays as 26."""
+    game = HeartsGame(seed=0)
+    game.deal()
+
+    game.hands = {
+        0: ["AC", "AD", "AH", "AS", "KC", "KD", "KH", "KS", "QC", "QD", "QH", "QS", "JH"],
+        1: ["2C", "3C", "4C", "5C", "6C", "2D", "3D", "4D", "5D", "6D", "2H", "3H", "2S"],
+        2: ["7C", "8C", "9C", "TC", "JC", "7D", "8D", "9D", "TD", "JD", "4H", "5H", "3S"],
+        3: ["7S", "8S", "9S", "TS", "JS", "7H", "8H", "9H", "TH", "6H", "6S", "4S", "5S"],
+    }
+    game._current_player = 1
+    game.trick_number = 1
+    game.hearts_broken = False
+
+    class HighAgent:
+        def choose_action(self, events, visible, legal):
+            return max(legal, key=lambda c: rank_value(c))
+
+    class LowAgent:
+        def choose_action(self, events, visible, legal):
+            return min(legal, key=lambda c: rank_value(c))
+
+    agents = [HighAgent(), LowAgent(), LowAgent(), LowAgent()]
+    pending = {i: [] for i in range(4)}
+
+    while not game.is_hand_over():
+        cp = game.get_current_player()
+        visible = game.get_visible_state(cp)
+        legal = game.get_legal_actions(cp)
+        card = agents[cp].choose_action([], visible, legal)
+        events = game.apply_action(cp, card)
+        for i in range(4):
+            if i != cp:
+                pending[i].extend(events)
+
+    scores = game.get_scores()
+    assert scores[0] == 26, f"Player 0 got {scores[0]}, expected 26"
+    assert sum(scores.values()) == 26
 
 
 def test_trick_winner_is_highest_of_led_suit():
@@ -278,4 +315,4 @@ def test_no_crashes_1000_hands():
         game = HeartsGame(seed=seed)
         scores, tricks, _ = play_full_hand(game, agents)
         assert len(tricks) == 13
-        assert sum(scores.values()) in (26, 78)
+        assert sum(scores.values()) == 26

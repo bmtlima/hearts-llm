@@ -6,7 +6,7 @@ from openai import OpenAI
 
 from agents.base import BaseAgent
 
-SYSTEM_PROMPT = """You are playing the card game Hearts as Player 0, against 3 other players.
+SYSTEM_PROMPT_BASE = """You are playing the card game Hearts as Player 0, against 3 other players.
 
 Rules:
 - 4 players, 13 tricks per hand. Standard 52-card deck.
@@ -14,8 +14,7 @@ Rules:
 - Hearts cannot be led until a heart has been discarded on a previous trick ("hearts broken").
 - First trick: the player with the 2 of clubs leads it. No hearts or Queen of Spades may be played on the first trick (unless you have no other option).
 - Scoring: each heart = 1 point, Queen of Spades (QS) = 13 points. Lowest score wins.
-- If one player takes all 26 points, they score 0 and everyone else scores 26 ("shooting the moon").
-
+{moon_rule}
 Cards are written as rank + suit. Ranks: 2,3,4,5,6,7,8,9,T,J,Q,K,A. Suits: C,D,H,S.
 Examples: "2C" = 2 of clubs, "TH" = 10 of hearts, "QS" = queen of spades.
 
@@ -27,6 +26,14 @@ Each turn I will tell you:
 
 Respond with ONLY the card you want to play. Just the card code, nothing else. Example: "QS"
 """
+
+MOON_RULE = "- If one player takes all 26 points, they score 0 and everyone else scores 26 (\"shooting the moon\").\n"
+
+
+def get_system_prompt(shoot_the_moon: bool = False) -> str:
+    return SYSTEM_PROMPT_BASE.format(
+        moon_rule=MOON_RULE if shoot_the_moon else ""
+    )
 
 MAX_RETRIES = 2
 CARD_PATTERN = re.compile(r"[2-9TJQKA][CDHS]")
@@ -100,8 +107,9 @@ def build_turn_prompt(events, visible_state, legal_actions, oracle_info=None):
 
 
 class LLMAgent(BaseAgent):
-    def __init__(self, model: str = "deepseek/deepseek-v3.2", api_key: str | None = None):
+    def __init__(self, model: str = "deepseek/deepseek-v3.2", api_key: str | None = None, shoot_the_moon: bool = False):
         self.model = model
+        self.system_prompt = get_system_prompt(shoot_the_moon)
         self.client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=api_key,
@@ -148,7 +156,7 @@ class LLMAgent(BaseAgent):
                 else:
                     cleaned.append(msg)
             cleaned.append(self.messages[-1])
-            api_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + cleaned
+            api_messages = [{"role": "system", "content": self.system_prompt}] + cleaned
             if attempt == 0:
                 self._last_api_messages = api_messages
             response = self.client.chat.completions.create(

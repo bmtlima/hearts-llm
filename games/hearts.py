@@ -31,7 +31,8 @@ def points_for_card(card: str) -> int:
 
 
 class HeartsGame(BaseGame):
-    def __init__(self, seed: int = 0):
+    def __init__(self, seed: int = 0, shoot_the_moon: bool = False):
+        self.shoot_the_moon = shoot_the_moon
         self.rng = random.Random(seed)
         self.hands: dict[int, list[str]] = {}
         self.current_trick: list[tuple[int, str]] = []
@@ -146,15 +147,14 @@ class HeartsGame(BaseGame):
             self.current_trick = []
 
             if self._tricks_played == 13:
-                # Shoot the moon check
-                for p in range(4):
-                    if self.scores[p] == 26:
-                        self.scores[p] = 0
-                        for other in range(4):
-                            if other != p:
-                                self.scores[other] = 26
-                        break
-
+                if self.shoot_the_moon:
+                    for p in range(4):
+                        if self.scores[p] == 26:
+                            self.scores[p] = 0
+                            for other in range(4):
+                                if other != p:
+                                    self.scores[other] = 26
+                            break
                 self._hand_over = True
                 events.append(
                     {"type": "hand_over", "scores": dict(self.scores)}
