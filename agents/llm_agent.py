@@ -6,7 +6,7 @@ from openai import OpenAI
 
 from agents.base import BaseAgent
 
-SYSTEM_PROMPT_BASE = """You are playing the card game Hearts as Player 0, against 3 other players.
+SYSTEM_PROMPT_BASE = """You are playing a variation of the card game Hearts as Player 0, against 3 other players.
 
 Rules:
 - 4 players, 13 tricks per hand. Standard 52-card deck.
@@ -15,6 +15,7 @@ Rules:
 - First trick: the player with the 2 of clubs leads it. No hearts or Queen of Spades may be played on the first trick (unless you have no other option).
 - Scoring: each heart = 1 point, Queen of Spades (QS) = 13 points. Lowest score wins.
 {moon_rule}
+- Unlike the traditional variation of the game, there's no card passing.
 Cards are written as rank + suit. Ranks: 2,3,4,5,6,7,8,9,T,J,Q,K,A. Suits: C,D,H,S.
 Examples: "2C" = 2 of clubs, "TH" = 10 of hearts, "QS" = queen of spades.
 
@@ -24,15 +25,16 @@ Each turn I will tell you:
 - The current trick so far (if any cards have been played)
 - Your legal plays
 
-Respond with ONLY the card you want to play. Just the card code, nothing else. Example: "QS"
+Respond with ONLY the card you want to play. Just the card code, nothing else. Example: "QS" if you want to play the queen of spades.
 """
 
 MOON_RULE = "- If one player takes all 26 points, they score 0 and everyone else scores 26 (\"shooting the moon\").\n"
+NO_MOON_RULE = "- Unlike the traditional game, players cannot shoot the moon. Your goal is to always minimize the amount of points you receive across all 13 tricks."
 
 
 def get_system_prompt(shoot_the_moon: bool = False) -> str:
     return SYSTEM_PROMPT_BASE.format(
-        moon_rule=MOON_RULE if shoot_the_moon else ""
+        moon_rule=MOON_RULE if shoot_the_moon else NO_MOON_RULE
     )
 
 MAX_RETRIES = 2
