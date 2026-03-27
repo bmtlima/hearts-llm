@@ -109,8 +109,9 @@ def build_turn_prompt(events, visible_state, legal_actions, oracle_info=None):
 
 
 class LLMAgent(BaseAgent):
-    def __init__(self, model: str = "deepseek/deepseek-v3.2", api_key: str | None = None, shoot_the_moon: bool = False):
+    def __init__(self, model: str = "qwen/qwen3.5-35b-a3b", api_key: str | None = None, shoot_the_moon: bool = False, reasoning: bool = False):
         self.model = model
+        self.reasoning = reasoning
         self.system_prompt = get_system_prompt(shoot_the_moon)
         self.client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
@@ -161,27 +162,32 @@ class LLMAgent(BaseAgent):
             api_messages = [{"role": "system", "content": self.system_prompt}] + cleaned
             if attempt == 0:
                 self._last_api_messages = api_messages
-            response = self.client.chat.completions.create(
+            create_kwargs = dict(
                 model=self.model,
-                max_tokens=10,
                 temperature=0,
                 messages=api_messages,
-                extra_body={"reasoning": {"enabled": True, "max_tokens": 2000}},
             )
+            if self.reasoning:
+                create_kwargs["extra_body"] = {"reasoning": {"enabled": True}}
+            else:
+                create_kwargs["max_tokens"] = 10
+                create_kwargs["extra_body"] = {"reasoning": {"enabled": False}}
+
+            response = self.client.chat.completions.create(**create_kwargs)
 
             raw_text = response.choices[0].message.content or ""
             total_input_tokens += response.usage.prompt_tokens
             total_output_tokens += response.usage.completion_tokens
-            # Reasoning tokens from completion_tokens_details
-            ctd = response.usage.completion_tokens_details
-            if ctd and ctd.reasoning_tokens:
-                total_reasoning_tokens += ctd.reasoning_tokens
 
-            # Reasoning content from model_extra
-            msg = response.choices[0].message
-            r_content = (msg.model_extra or {}).get("reasoning")
-            if attempt == 0 and r_content:
-                reasoning_content = r_content
+            if self.reasoning:
+                ctd = response.usage.completion_tokens_details
+                if ctd and ctd.reasoning_tokens:
+                    total_reasoning_tokens += ctd.reasoning_tokens
+
+                msg = response.choices[0].message
+                r_content = (msg.model_extra or {}).get("reasoning")
+                if attempt == 0 and r_content:
+                    reasoning_content = r_content
 
             if attempt == 0:
                 raw_response = raw_text

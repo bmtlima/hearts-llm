@@ -16,11 +16,11 @@ from games.hearts import HeartsGame
 from orchestrator import play_hand
 
 
-def play_single_hand(hand_num, seed, model, api_key, info_mode, shoot_the_moon=False):
+def play_single_hand(hand_num, seed, model, api_key, info_mode, shoot_the_moon=False, reasoning=False, verbose=False):
     """Play one hand. Fully self-contained — no shared state."""
     game = HeartsGame(seed=seed + hand_num, shoot_the_moon=shoot_the_moon)
 
-    llm_agent = LLMAgent(model=model, api_key=api_key, shoot_the_moon=shoot_the_moon)
+    llm_agent = LLMAgent(model=model, api_key=api_key, shoot_the_moon=shoot_the_moon, reasoning=reasoning)
     rule1, rule2, rule3 = RuleAgent(), RuleAgent(), RuleAgent()
     agents = [llm_agent, rule1, rule2, rule3]
 
@@ -28,7 +28,7 @@ def play_single_hand(hand_num, seed, model, api_key, info_mode, shoot_the_moon=F
     rule_baseline = RuleAgent()
     baselines = {"duck": duck_baseline, "rule": rule_baseline}
 
-    result = play_hand(game, agents, baselines, info_mode=info_mode)
+    result = play_hand(game, agents, baselines, info_mode=info_mode, verbose=verbose)
 
     return {
         "hand_number": hand_num,
@@ -42,7 +42,7 @@ def play_single_hand(hand_num, seed, model, api_key, info_mode, shoot_the_moon=F
     }
 
 
-def run_experiment(num_hands, model, seed=42, info_mode="raw", workers=1, shoot_the_moon=False):
+def run_experiment(num_hands, model, seed=42, info_mode="raw", workers=1, shoot_the_moon=False, reasoning=False, verbose=False):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_path = f"logs/experiment_{info_mode}_{timestamp}.jsonl"
     os.makedirs("logs", exist_ok=True)
@@ -53,7 +53,7 @@ def run_experiment(num_hands, model, seed=42, info_mode="raw", workers=1, shoot_
 
     if workers <= 1:
         for hand_num in range(num_hands):
-            hand_log = play_single_hand(hand_num, seed, model, api_key, info_mode, shoot_the_moon)
+            hand_log = play_single_hand(hand_num, seed, model, api_key, info_mode, shoot_the_moon, reasoning, verbose)
             all_results.append(hand_log)
             s = hand_log["scores"]
             print(
@@ -63,7 +63,7 @@ def run_experiment(num_hands, model, seed=42, info_mode="raw", workers=1, shoot_
     else:
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = {
-                pool.submit(play_single_hand, h, seed, model, api_key, info_mode, shoot_the_moon): h
+                pool.submit(play_single_hand, h, seed, model, api_key, info_mode, shoot_the_moon, reasoning, verbose): h
                 for h in range(num_hands)
             }
             for future in as_completed(futures):
@@ -148,7 +148,7 @@ def print_summary(results):
 def main():
     parser = argparse.ArgumentParser(description="Hearts context-rot experiment")
     parser.add_argument("--num-hands", type=int, default=10)
-    parser.add_argument("--model", type=str, default="deepseek/deepseek-v3.2")
+    parser.add_argument("--model", type=str, default="qwen/qwen3.5-35b-a3b")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
         "--info-mode",
@@ -159,9 +159,13 @@ def main():
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--shoot-the-moon", action="store_true", default=False,
                         help="Enable shoot-the-moon scoring (disabled by default)")
+    parser.add_argument("--reasoning", action="store_true", default=False,
+                        help="Enable LLM reasoning/thinking (disabled by default)")
+    parser.add_argument("--verbose", "-v", action="store_true", default=False,
+                        help="Print each LLM trick as it completes")
     args = parser.parse_args()
 
-    run_experiment(args.num_hands, args.model, args.seed, args.info_mode, args.workers, args.shoot_the_moon)
+    run_experiment(args.num_hands, args.model, args.seed, args.info_mode, args.workers, args.shoot_the_moon, args.reasoning, args.verbose)
 
 
 if __name__ == "__main__":

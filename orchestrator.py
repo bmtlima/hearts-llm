@@ -40,7 +40,7 @@ def compute_oracle_info(game, player_id, cards_played, player_voids):
     }
 
 
-def play_hand(game, agents, baselines=None, info_mode="raw"):
+def play_hand(game, agents, baselines=None, info_mode="raw", verbose=False):
     """
     Play one 13-trick hand of Hearts.
 
@@ -128,6 +128,28 @@ def play_hand(game, agents, baselines=None, info_mode="raw"):
             if hasattr(agent, "last_turn_metadata"):
                 turn_log.update(agent.last_turn_metadata)
             llm_turns.append(turn_log)
+
+            if verbose:
+                meta = agent.last_turn_metadata if hasattr(agent, "last_turn_metadata") else {}
+                duck_match = "=" if baseline_choices.get("duck") == card else "≠"
+                rule_match = "=" if baseline_choices.get("rule") == card else "≠"
+                elapsed = f"{meta.get('elapsed_seconds', 0):.1f}s"
+                retries = meta.get("num_retries", 0)
+                in_tok = meta.get("input_tokens", 0)
+                r_tok = meta.get("reasoning_tokens", 0)
+                parts = [
+                    f"  Trick {visible['trick_number']:>2}/13",
+                    f"played={card}",
+                    f"duck{duck_match}{baseline_choices.get('duck', '?')}",
+                    f"rule{rule_match}{baseline_choices.get('rule', '?')}",
+                    f"{elapsed}",
+                    f"in={in_tok}",
+                ]
+                if r_tok:
+                    parts.append(f"reason={r_tok}")
+                if retries:
+                    parts.append(f"retries={retries}")
+                print("  ".join(parts), flush=True)
 
         # --- Apply action, distribute events ---
         new_events = game.apply_action(current_player, card)
